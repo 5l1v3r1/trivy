@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/aquasecurity/trivy/pkg/types"
+
 	"github.com/google/wire"
 	digest "github.com/opencontainers/go-digest"
 	"golang.org/x/xerrors"
 
-	"github.com/aquasecurity/fanal/types"
+	ftypes "github.com/aquasecurity/fanal/types"
 	"github.com/aquasecurity/trivy/pkg/report"
 	r "github.com/aquasecurity/trivy/pkg/rpc"
 	rpc "github.com/aquasecurity/trivy/rpc/scanner"
@@ -36,7 +38,7 @@ func NewScanner(customHeaders CustomHeaders, s rpc.Scanner) Scanner {
 	return Scanner{customHeaders: customHeaders, client: s}
 }
 
-func (s Scanner) Scan(target string, imageID digest.Digest, layerIDs []string) (report.Results, *types.OS, bool, error) {
+func (s Scanner) Scan(target string, imageID digest.Digest, layerIDs []string, options types.ScanOptions) (report.Results, *ftypes.OS, bool, error) {
 	ctx := WithCustomHeaders(context.Background(), http.Header(s.customHeaders))
 
 	var res *rpc.ScanResponse
@@ -46,6 +48,9 @@ func (s Scanner) Scan(target string, imageID digest.Digest, layerIDs []string) (
 			Target:   target,
 			ImageId:  string(imageID),
 			LayerIds: layerIDs,
+			Options: &rpc.ScanOptions{
+				VulnType: options.VulnType,
+			},
 		})
 		return err
 	})

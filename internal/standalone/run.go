@@ -13,6 +13,7 @@ import (
 	"github.com/aquasecurity/trivy/internal/standalone/config"
 	"github.com/aquasecurity/trivy/pkg/log"
 	"github.com/aquasecurity/trivy/pkg/report"
+	"github.com/aquasecurity/trivy/pkg/scanner"
 	"github.com/aquasecurity/trivy/pkg/types"
 	"github.com/aquasecurity/trivy/pkg/utils"
 	"github.com/urfave/cli"
@@ -68,18 +69,29 @@ func run(c config.Config) (err error) {
 		return nil
 	}
 
+	var scanner scanner.Scanner
+	ctx := context.Background()
+
+	if c.Input != "" {
+		// scan tar file
+		scanner, err = initializeArchiveScanner(ctx, c.Input, cacheClient, cacheClient, c.Timeout)
+		if err != nil {
+			return err
+		}
+	} else {
+		// scan an image in Docker Engine or Docker Registry
+		scanner, err = initializeDockerScanner(ctx, c.ImageName, cacheClient, cacheClient, c.Timeout)
+		if err != nil {
+			return err
+		}
+	}
+
 	scanOptions := types.ScanOptions{
 		VulnType: c.VulnType,
-		Timeout:  c.Timeout,
 	}
 	log.Logger.Debugf("Vulnerability type:  %s", scanOptions.VulnType)
 
-	ctx := context.Background()
-	scanner, err := initializeScanner(ctx, c.ImageName, cacheClient, cacheClient)
-	if err != nil {
-		return err
-	}
-	results, err := scanner.ScanImage()
+	results, err := scanner.ScanImage(scanOptions)
 	if err != nil {
 		return xerrors.Errorf("error in image scan: %w", err)
 	}

@@ -4,12 +4,12 @@ import (
 	"context"
 	"os"
 
-	"github.com/aquasecurity/trivy/pkg/rpc/client"
-
 	"github.com/aquasecurity/trivy/internal/client/config"
 	"github.com/aquasecurity/trivy/pkg/cache"
 	"github.com/aquasecurity/trivy/pkg/log"
 	"github.com/aquasecurity/trivy/pkg/report"
+	"github.com/aquasecurity/trivy/pkg/rpc/client"
+	"github.com/aquasecurity/trivy/pkg/scanner"
 	"github.com/aquasecurity/trivy/pkg/types"
 	"github.com/aquasecurity/trivy/pkg/utils"
 	"github.com/urfave/cli"
@@ -36,28 +36,39 @@ func run(c config.Config) (err error) {
 
 	// configure cache dir
 	utils.SetCacheDir(c.CacheDir)
-
 	log.Logger.Debugf("cache dir:  %s", utils.CacheDir())
 
 	if c.ClearCache {
+		log.Logger.Warn("A client doesn't have image cache")
 		return nil
 	}
 
+	var scanner scanner.Scanner
+	ctx := context.Background()
+	remoteCache := cache.NewRemoteCache(cache.RemoteURL(c.RemoteAddr), c.CustomHeaders)
+
+	if c.Input != "" {
+		// scan tar file
+		scanner, err = initializeArchiveScanner(ctx, c.Input, remoteCache,
+			client.CustomHeaders(c.CustomHeaders), client.RemoteURL(c.RemoteAddr), c.Timeout)
+		if err != nil {
+			return err
+		}
+	} else {
+		// scan an image in Docker Engine or Docker Registry
+		scanner, err = initializeDockerScanner(ctx, c.ImageName, remoteCache,
+			client.CustomHeaders(c.CustomHeaders), client.RemoteURL(c.RemoteAddr), c.Timeout)
+		if err != nil {
+			return err
+		}
+	}
+
 	scanOptions := types.ScanOptions{
-		VulnType:  c.VulnType,
-		Timeout:   c.Timeout,
-		RemoteURL: c.RemoteAddr,
+		VulnType: c.VulnType,
 	}
 	log.Logger.Debugf("Vulnerability type:  %s", scanOptions.VulnType)
 
-	ctx := context.Background()
-	remoteCache := cache.NewRemoteCache(cache.RemoteURL(c.RemoteAddr))
-	scanner, err := initializeScanner(ctx, c.ImageName, remoteCache,
-		client.CustomHeaders(c.CustomHeaders), client.RemoteURL(c.RemoteAddr))
-	if err != nil {
-		return err
-	}
-	results, err := scanner.ScanImage()
+	results, err := scanner.ScanImage(scanOptions)
 	if err != nil {
 		return xerrors.Errorf("error in image scan: %w", err)
 	}

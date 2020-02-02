@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/aquasecurity/trivy/pkg/types"
+	"github.com/aquasecurity/trivy/pkg/utils"
+
 	"github.com/aquasecurity/fanal/analyzer"
 
 	"github.com/google/wire"
@@ -50,44 +53,69 @@ func NewScanner(applier analyzer.Applier, ospkgDetector ospkgDetector.Detector, 
 	return Scanner{applier: applier, ospkgDetector: ospkgDetector, libDetector: libDetector}
 }
 
-func (s Scanner) Scan(target string, _ digest.Digest, layerIDs []string) (report.Results, *ftypes.OS, bool, error) {
-	results := report.Results{}
-
+func (s Scanner) Scan(target string, _ digest.Digest, layerIDs []string, options types.ScanOptions) (report.Results, *ftypes.OS, bool, error) {
 	imageDetail, err := s.applier.ApplyLayers(layerIDs)
 	if err != nil {
 		return nil, nil, false, err
 	}
 
-	vulns, eosl, err := s.ospkgDetector.Detect(imageDetail.OS.Family, imageDetail.OS.Name, imageDetail.Packages)
+	var eosl bool
+	var results report.Results
+
+	if utils.StringInSlice("os", options.VulnType) {
+		var result *report.Result
+		result, eosl, err = s.scanOSPkg(target, imageDetail.OS.Family, imageDetail.OS.Name, imageDetail.Packages)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if result != nil {
+			results = append(results, *result)
+		}
+	}
+
+	if utils.StringInSlice("library", options.VulnType) {
+		libResults, err := s.scanLibrary(imageDetail.Applications)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		results = append(results, libResults...)
+	}
+
+	return results, imageDetail.OS, eosl, nil
+}
+
+func (s Scanner) scanOSPkg(target, osFamily, osName string, pkgs []ftypes.Package) (*report.Result, bool, error) {
+	if osFamily == "" {
+		return nil, false, nil
+	}
+	vulns, eosl, err := s.ospkgDetector.Detect(osFamily, osName, pkgs)
 	if err != nil && err != ospkgDetector.ErrUnsupportedOS {
-		return nil, nil, false, xerrors.Errorf("failed to scan the image: %w", err)
+		return nil, false, xerrors.Errorf("failed to scan the image: %w", err)
 	}
 
-	if imageDetail.OS.Family != "" {
-		imageDetail := fmt.Sprintf("%s (%s %s)", target, imageDetail.OS.Family, imageDetail.OS.Name)
-		results = append(results, report.Result{
-			Target:          imageDetail,
-			Vulnerabilities: vulns,
-		})
+	imageDetail := fmt.Sprintf("%s (%s %s)", target, osFamily, osName)
+	result := &report.Result{
+		Target:          imageDetail,
+		Vulnerabilities: vulns,
 	}
+	return result, eosl, nil
+}
 
-	libResults := report.Results{}
-	for _, app := range imageDetail.Applications {
+func (s Scanner) scanLibrary(apps []ftypes.Application) (report.Results, error) {
+	var results report.Results
+	for _, app := range apps {
 		vulns, err := s.libDetector.Detect(app.FilePath, app.Libraries)
 		if err != nil {
-			return nil, nil, false, xerrors.Errorf("failed library scan: %w", err)
+			return nil, xerrors.Errorf("failed library scan: %w", err)
 		}
 
-		libResults = append(libResults, report.Result{
+		results = append(results, report.Result{
 			Target:          app.FilePath,
 			Vulnerabilities: vulns,
 		})
 	}
-	sort.Slice(libResults, func(i, j int) bool {
-		return libResults[i].Target < libResults[j].Target
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Target < results[j].Target
 	})
-
-	results = append(results, libResults...)
-
-	return results, imageDetail.OS, eosl, nil
+	return results, nil
 }

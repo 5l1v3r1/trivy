@@ -8,21 +8,21 @@ import (
 )
 
 type DockerConfig struct {
-	UserName string        `env:"TRIVY_USERNAME"`
-	Password string        `env:"TRIVY_PASSWORD"`
-	Timeout  time.Duration `env:"TRIVY_TIMEOUT_SEC" envDefault:"60s"`
-	Insecure bool          `env:"TRIVY_INSECURE" envDefault:"true"`
+	UserName string `env:"TRIVY_USERNAME"`
+	Password string `env:"TRIVY_PASSWORD"`
+	Insecure bool   `env:"TRIVY_INSECURE" envDefault:"true"`
 }
 
-func GetDockerOption() (types.DockerOption, error) {
+func GetDockerOption(timeout time.Duration) (types.DockerOption, error) {
 	cfg := DockerConfig{}
 	if err := env.Parse(&cfg); err != nil {
 		return types.DockerOption{}, err
 	}
+
 	return types.DockerOption{
 		UserName:              cfg.UserName,
 		Password:              cfg.Password,
-		Timeout:               cfg.Timeout,
+		Timeout:               timeout,
 		InsecureSkipTLSVerify: cfg.Insecure,
 	}, nil
 }

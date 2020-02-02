@@ -2,138 +2,183 @@ package server
 
 import (
 	"context"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-	"sync"
 	"testing"
-	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"golang.org/x/xerrors"
 
-	"github.com/aquasecurity/trivy-db/pkg/db"
-	dbFile "github.com/aquasecurity/trivy/pkg/db"
-	"github.com/aquasecurity/trivy/pkg/log"
+	"github.com/aquasecurity/fanal/types"
+
+	"github.com/aquasecurity/trivy/rpc/common"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/aquasecurity/fanal/cache"
+	godeptypes "github.com/aquasecurity/go-dep-parser/pkg/types"
+	rpcLayer "github.com/aquasecurity/trivy/rpc/layer"
+	google_protobuf "github.com/golang/protobuf/ptypes/empty"
 )
 
-func TestMain(m *testing.M) {
-	log.InitLogger(false, false)
-	os.Exit(m.Run())
-}
-
-func Test_dbWorker_update(t *testing.T) {
-	type needsUpdateInput struct {
-		appVersion string
-		skip       bool
-	}
-	type needsUpdateOutput struct {
-		needsUpdate bool
-		err         error
-	}
-	type needsUpdate struct {
-		input  needsUpdateInput
-		output needsUpdateOutput
-	}
-
-	type download struct {
-		call bool
-		err  error
-	}
-
+func TestLayerServer_Put(t *testing.T) {
 	type args struct {
-		appVersion string
+		in *rpcLayer.PutRequest
 	}
 	tests := []struct {
-		name        string
-		needsUpdate needsUpdate
-		download    download
-		args        args
-		want        db.Metadata
-		wantErr     string
+		name     string
+		args     args
+		putLayer cache.PutLayerExpectation
+		want     *google_protobuf.Empty
+		wantErr  string
 	}{
 		{
 			name: "happy path",
-			needsUpdate: needsUpdate{
-				input:  needsUpdateInput{appVersion: "1", skip: false},
-				output: needsUpdateOutput{needsUpdate: true},
+			args: args{
+				in: &rpcLayer.PutRequest{
+					LayerId:             "sha256:154ad0735c360b212b167f424d33a62305770a1fcfb6363882f5c436cfbd9812",
+					DecompressedLayerId: "sha256:b2a1a2d80bf0c747a4f6b0ca6af5eef23f043fcdb1ed4f3a3e750aef2dc68079",
+					SchemaVersion:       1,
+					Os: &common.OS{
+						Family: "alpine",
+						Name:   "3.11",
+					},
+					PackageInfos: []*common.PackageInfo{
+						{
+							FilePath: "lib/apk/db/installed",
+							Packages: []*common.Package{
+								{
+									Name:       "binary",
+									Version:    "1.2.3",
+									Release:    "1",
+									Epoch:      2,
+									Arch:       "x86_64",
+									SrcName:    "src",
+									SrcVersion: "1.2.3",
+									SrcRelease: "1",
+									SrcEpoch:   2,
+								},
+								{
+									Name:       "vim-minimal",
+									Version:    "7.4.160",
+									Release:    "5.el7",
+									Epoch:      2,
+									Arch:       "x86_64",
+									SrcName:    "vim",
+									SrcVersion: "7.4.160",
+									SrcRelease: "5.el7",
+									SrcEpoch:   2,
+								},
+							},
+						},
+					},
+					Applications: []*common.Application{
+						{
+							Type:     "composer",
+							FilePath: "php-app/composer.lock",
+							Libraries: []*common.Library{
+								{
+									Name:    "guzzlehttp/guzzle",
+									Version: "6.2.0",
+								},
+								{
+									Name:    "guzzlehttp/promises",
+									Version: "v1.3.1",
+								},
+							},
+						},
+					},
+					OpaqueDirs:    []string{"etc/"},
+					WhiteoutFiles: []string{"etc/hostname"},
+				},
 			},
-			download: download{
-				call: true,
+			putLayer: cache.PutLayerExpectation{
+				Args: cache.PutLayerArgs{
+					LayerID:             "sha256:154ad0735c360b212b167f424d33a62305770a1fcfb6363882f5c436cfbd9812",
+					DecompressedLayerID: "sha256:b2a1a2d80bf0c747a4f6b0ca6af5eef23f043fcdb1ed4f3a3e750aef2dc68079",
+					LayerInfo: types.LayerInfo{
+						SchemaVersion: 1,
+						OS: &types.OS{
+							Family: "alpine",
+							Name:   "3.11",
+						},
+						PackageInfos: []types.PackageInfo{
+							{
+								FilePath: "lib/apk/db/installed",
+								Packages: []types.Package{
+									{
+										Name:       "binary",
+										Version:    "1.2.3",
+										Release:    "1",
+										Epoch:      2,
+										Arch:       "x86_64",
+										SrcName:    "src",
+										SrcVersion: "1.2.3",
+										SrcRelease: "1",
+										SrcEpoch:   2,
+									},
+									{
+										Name:       "vim-minimal",
+										Version:    "7.4.160",
+										Release:    "5.el7",
+										Epoch:      2,
+										Arch:       "x86_64",
+										SrcName:    "vim",
+										SrcVersion: "7.4.160",
+										SrcRelease: "5.el7",
+										SrcEpoch:   2,
+									},
+								},
+							},
+						},
+						Applications: []types.Application{
+							{
+								Type:     "composer",
+								FilePath: "php-app/composer.lock",
+								Libraries: []godeptypes.Library{
+									{
+										Name:    "guzzlehttp/guzzle",
+										Version: "6.2.0",
+									},
+									{
+										Name:    "guzzlehttp/promises",
+										Version: "v1.3.1",
+									},
+								},
+							},
+						},
+						OpaqueDirs:    []string{"etc/"},
+						WhiteoutFiles: []string{"etc/hostname"},
+					},
+				},
+				Returns: cache.PutLayerReturns{},
 			},
-			args: args{appVersion: "1"},
-			want: db.Metadata{
-				Version:    1,
-				Type:       db.TypeFull,
-				NextUpdate: time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC),
-				UpdatedAt:  time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC),
-			},
+			want: &google_protobuf.Empty{},
 		},
 		{
-			name: "not update",
-			needsUpdate: needsUpdate{
-				input:  needsUpdateInput{appVersion: "1", skip: false},
-				output: needsUpdateOutput{needsUpdate: false},
+			name: "sad path",
+			args: args{
+				in: &rpcLayer.PutRequest{},
 			},
-			args: args{appVersion: "1"},
-		},
-		{
-			name: "NeedsUpdate returns an error",
-			needsUpdate: needsUpdate{
-				input:  needsUpdateInput{appVersion: "1", skip: false},
-				output: needsUpdateOutput{err: xerrors.New("fail")},
+			putLayer: cache.PutLayerExpectation{
+				Args: cache.PutLayerArgs{
+					LayerIDAnything:             true,
+					DecompressedLayerIDAnything: true,
+					LayerInfoAnything:           true,
+				},
+				Returns: cache.PutLayerReturns{
+					Err: xerrors.New("error"),
+				},
 			},
-			args:    args{appVersion: "1"},
-			wantErr: "failed to check if db needs an update",
-		},
-		{
-			name: "Download returns an error",
-			needsUpdate: needsUpdate{
-				input:  needsUpdateInput{appVersion: "1", skip: false},
-				output: needsUpdateOutput{needsUpdate: true},
-			},
-			download: download{
-				call: true,
-				err:  xerrors.New("fail"),
-			},
-			args:    args{appVersion: "1"},
-			wantErr: "failed DB hot update",
+			wantErr: "unable to store layer info in cache",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cacheDir, err := ioutil.TempDir("", "server-test")
-			require.NoError(t, err, tt.name)
+			mockCache := new(cache.MockCache)
+			mockCache.ApplyPutLayerExpectation(tt.putLayer)
 
-			require.NoError(t, db.Init(cacheDir), tt.name)
+			s := NewLayerServer(mockCache)
+			got, err := s.Put(context.Background(), tt.args.in)
 
-			mockDBClient := new(dbFile.MockClient)
-			mockDBClient.On("NeedsUpdate", mock.Anything,
-				tt.needsUpdate.input.appVersion, false, tt.needsUpdate.input.skip).Return(
-				tt.needsUpdate.output.needsUpdate, tt.needsUpdate.output.err)
-
-			if tt.download.call {
-				mockDBClient.On("Download", mock.Anything, mock.Anything, false).Run(
-					func(args mock.Arguments) {
-						// fake download: copy testdata/new.db to tmpDir/db/trivy.db
-						content, err := ioutil.ReadFile("testdata/new.db")
-						require.NoError(t, err, tt.name)
-
-						tmpDir := args.String(1)
-						dbPath := db.Path(tmpDir)
-						require.NoError(t, os.MkdirAll(filepath.Dir(dbPath), 0777), tt.name)
-						err = ioutil.WriteFile(dbPath, content, 0444)
-						require.NoError(t, err, tt.name)
-					}).Return(tt.download.err)
-			}
-
-			w := newDBWorker(mockDBClient)
-
-			var dbUpdateWg, requestWg sync.WaitGroup
-			err = w.update(context.Background(), tt.args.appVersion, cacheDir,
-				&dbUpdateWg, &requestWg)
 			if tt.wantErr != "" {
 				require.NotNil(t, err, tt.name)
 				assert.Contains(t, err.Error(), tt.wantErr, tt.name)
@@ -142,16 +187,7 @@ func Test_dbWorker_update(t *testing.T) {
 				assert.NoError(t, err, tt.name)
 			}
 
-			if !tt.download.call {
-				return
-			}
-
-			dbc := db.Config{}
-			got, err := dbc.GetMetadata()
-			assert.NoError(t, err, tt.name)
-			assert.Equal(t, tt.want, got, tt.name)
-
-			mockDBClient.AssertExpectations(t)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

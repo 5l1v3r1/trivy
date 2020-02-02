@@ -4,6 +4,7 @@ package client
 
 import (
 	"context"
+	"time"
 
 	"github.com/aquasecurity/fanal/cache"
 	"github.com/aquasecurity/trivy/pkg/rpc/client"
@@ -12,9 +13,15 @@ import (
 	"github.com/google/wire"
 )
 
-func initializeScanner(ctx context.Context, imageName string, layerCache cache.LayerCache, customHeaders client.CustomHeaders,
-	url client.RemoteURL) (scanner.Scanner, error) {
-	wire.Build(scanner.ClientSet)
+func initializeDockerScanner(ctx context.Context, imageName string, layerCache cache.LayerCache, customHeaders client.CustomHeaders,
+	url client.RemoteURL, timeout time.Duration) (scanner.Scanner, error) {
+	wire.Build(scanner.RemoteDockerSet)
+	return scanner.Scanner{}, nil
+}
+
+func initializeArchiveScanner(ctx context.Context, filePath string, layerCache cache.LayerCache, customHeaders client.CustomHeaders,
+	url client.RemoteURL, timeout time.Duration) (scanner.Scanner, error) {
+	wire.Build(scanner.RemoteArchiveSet)
 	return scanner.Scanner{}, nil
 }
 

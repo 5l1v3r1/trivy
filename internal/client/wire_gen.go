@@ -15,18 +15,35 @@ import (
 	"github.com/aquasecurity/trivy/pkg/scanner"
 	"github.com/aquasecurity/trivy/pkg/types"
 	"github.com/aquasecurity/trivy/pkg/vulnerability"
+	"time"
 )
 
 // Injectors from inject.go:
 
-func initializeScanner(ctx context.Context, imageName string, layerCache cache.LayerCache, customHeaders client.CustomHeaders, url client.RemoteURL) (scanner.Scanner, error) {
+func initializeDockerScanner(ctx context.Context, imageName string, layerCache cache.LayerCache, customHeaders client.CustomHeaders, url client.RemoteURL, timeout time.Duration) (scanner.Scanner, error) {
 	scannerScanner := client.NewProtobufClient(url)
 	clientScanner := client.NewScanner(customHeaders, scannerScanner)
-	dockerOption, err := types.GetDockerOption()
+	dockerOption, err := types.GetDockerOption(timeout)
 	if err != nil {
 		return scanner.Scanner{}, err
 	}
 	extractor, err := docker.NewDockerExtractor(ctx, imageName, dockerOption)
+	if err != nil {
+		return scanner.Scanner{}, err
+	}
+	config := analyzer.New(extractor, layerCache)
+	scanner2 := scanner.NewScanner(clientScanner, config, layerCache)
+	return scanner2, nil
+}
+
+func initializeArchiveScanner(ctx context.Context, filePath string, layerCache cache.LayerCache, customHeaders client.CustomHeaders, url client.RemoteURL, timeout time.Duration) (scanner.Scanner, error) {
+	scannerScanner := client.NewProtobufClient(url)
+	clientScanner := client.NewScanner(customHeaders, scannerScanner)
+	dockerOption, err := types.GetDockerOption(timeout)
+	if err != nil {
+		return scanner.Scanner{}, err
+	}
+	extractor, err := docker.NewDockerArchiveExtractor(ctx, filePath, dockerOption)
 	if err != nil {
 		return scanner.Scanner{}, err
 	}
