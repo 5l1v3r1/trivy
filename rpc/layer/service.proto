@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package trivy.layer;
+option  go_package = "layer";
+
+import "github.com/aquasecurity/trivy/rpc/common/service.proto";
+import "google/protobuf/empty.proto";
+
+service Layer {
+  rpc Put(PutRequest) returns (google.protobuf.Empty);
+  rpc MissingLayers(Layers) returns (Layers);
+}
+
+message PutRequest {
+  string    layer_id                         = 1;
+  int32     schema_version                   = 2;
+  common.OS os                               = 3;
+  repeated common.PackageInfo package_infos  = 4;
+  repeated common.Application applications   = 5;
+  repeated string             opaque_dirs    = 6;
+  repeated string             whiteout_files = 7;
+}
+
+message PutResponse {
+  common.OS os   = 1;
+  bool      eosl = 2;
+}
+
+message Layers {
+  repeated string layer_ids = 1;
+}

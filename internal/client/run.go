@@ -1,20 +1,19 @@
 package client
 
 import (
+	"context"
 	"os"
 
-	"github.com/urfave/cli"
-	"golang.org/x/xerrors"
+	"github.com/aquasecurity/trivy/pkg/rpc/client"
 
-	"github.com/aquasecurity/fanal/cache"
 	"github.com/aquasecurity/trivy/internal/client/config"
-	"github.com/aquasecurity/trivy/internal/operation"
+	"github.com/aquasecurity/trivy/pkg/cache"
 	"github.com/aquasecurity/trivy/pkg/log"
 	"github.com/aquasecurity/trivy/pkg/report"
-	"github.com/aquasecurity/trivy/pkg/rpc/client/library"
-	"github.com/aquasecurity/trivy/pkg/rpc/client/ospkg"
 	"github.com/aquasecurity/trivy/pkg/types"
 	"github.com/aquasecurity/trivy/pkg/utils"
+	"github.com/urfave/cli"
+	"golang.org/x/xerrors"
 )
 
 func Run(cliCtx *cli.Context) error {
@@ -37,12 +36,11 @@ func run(c config.Config) (err error) {
 
 	// configure cache dir
 	utils.SetCacheDir(c.CacheDir)
-	cacheClient := cache.Initialize(c.CacheDir)
-	cacheOperation := operation.NewCache(cacheClient)
+
 	log.Logger.Debugf("cache dir:  %s", utils.CacheDir())
 
 	if c.ClearCache {
-		return cacheOperation.ClearImages()
+		return nil
 	}
 
 	scanOptions := types.ScanOptions{
@@ -52,10 +50,14 @@ func run(c config.Config) (err error) {
 	}
 	log.Logger.Debugf("Vulnerability type:  %s", scanOptions.VulnType)
 
-	scanner := initializeScanner(cacheClient,
-		ospkg.CustomHeaders(c.CustomHeaders), library.CustomHeaders(c.CustomHeaders),
-		ospkg.RemoteURL(c.RemoteAddr), library.RemoteURL(c.RemoteAddr))
-	results, err := scanner.ScanImage(c.ImageName, c.Input, scanOptions)
+	ctx := context.Background()
+	remoteCache := cache.NewRemoteCache(cache.RemoteURL(c.RemoteAddr))
+	scanner, err := initializeScanner(ctx, c.ImageName, remoteCache,
+		client.CustomHeaders(c.CustomHeaders), client.RemoteURL(c.RemoteAddr))
+	if err != nil {
+		return err
+	}
+	results, err := scanner.ScanImage()
 	if err != nil {
 		return xerrors.Errorf("error in image scan: %w", err)
 	}

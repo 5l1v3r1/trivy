@@ -1,6 +1,7 @@
 package standalone
 
 import (
+	"context"
 	"io/ioutil"
 	l "log"
 	"os"
@@ -38,7 +39,11 @@ func run(c config.Config) (err error) {
 
 	// configure cache dir
 	utils.SetCacheDir(c.CacheDir)
-	cacheClient := cache.Initialize(c.CacheDir)
+	cacheClient, err := cache.NewFSCache(c.CacheDir)
+	if err != nil {
+		return err
+	}
+
 	cacheOperation := operation.NewCache(cacheClient)
 	log.Logger.Debugf("cache dir:  %s", utils.CacheDir())
 
@@ -69,8 +74,12 @@ func run(c config.Config) (err error) {
 	}
 	log.Logger.Debugf("Vulnerability type:  %s", scanOptions.VulnType)
 
-	scanner := initializeScanner(cacheClient)
-	results, err := scanner.ScanImage(c.ImageName, c.Input, scanOptions)
+	ctx := context.Background()
+	scanner, err := initializeScanner(ctx, c.ImageName, cacheClient, cacheClient)
+	if err != nil {
+		return err
+	}
+	results, err := scanner.ScanImage()
 	if err != nil {
 		return xerrors.Errorf("error in image scan: %w", err)
 	}

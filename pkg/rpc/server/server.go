@@ -8,25 +8,32 @@ import (
 	"sync"
 	"time"
 
+	google_protobuf "github.com/golang/protobuf/ptypes/empty"
 	"github.com/google/wire"
-
+	digest "github.com/opencontainers/go-digest"
 	"github.com/twitchtv/twirp"
 	"golang.org/x/xerrors"
 
+	"github.com/aquasecurity/fanal/cache"
 	"github.com/aquasecurity/trivy-db/pkg/db"
 	"github.com/aquasecurity/trivy/internal/server/config"
 	dbFile "github.com/aquasecurity/trivy/pkg/db"
 	"github.com/aquasecurity/trivy/pkg/log"
+	"github.com/aquasecurity/trivy/pkg/rpc"
+	"github.com/aquasecurity/trivy/pkg/scanner/local"
 	"github.com/aquasecurity/trivy/pkg/utils"
-	rpc "github.com/aquasecurity/trivy/rpc/detector"
+	"github.com/aquasecurity/trivy/pkg/vulnerability"
+	"github.com/aquasecurity/trivy/rpc/detector"
+	rpcLayer "github.com/aquasecurity/trivy/rpc/layer"
+	rpcScanner "github.com/aquasecurity/trivy/rpc/scanner"
 )
 
-var SuperSet = wire.NewSet(
+var DBWorkerSuperSet = wire.NewSet(
 	dbFile.SuperSet,
 	newDBWorker,
 )
 
-func ListenAndServe(addr string, c config.Config) error {
+func ListenAndServe(addr string, c config.Config, fsCache cache.FSCache) error {
 	requestWg := &sync.WaitGroup{}
 	dbUpdateWg := &sync.WaitGroup{}
 
@@ -57,11 +64,11 @@ func ListenAndServe(addr string, c config.Config) error {
 
 	mux := http.NewServeMux()
 
-	osHandler := rpc.NewOSDetectorServer(initializeOspkgServer(), nil)
-	mux.Handle(rpc.OSDetectorPathPrefix, withToken(withWaitGroup(osHandler), c.Token, c.TokenHeader))
+	scanHandler := rpcScanner.NewScannerServer(initializeScanServer(fsCache), nil)
+	mux.Handle(rpcScanner.ScannerPathPrefix, withToken(withWaitGroup(scanHandler), c.Token, c.TokenHeader))
 
-	libHandler := rpc.NewLibDetectorServer(initializeLibServer(), nil)
-	mux.Handle(rpc.LibDetectorPathPrefix, withToken(withWaitGroup(libHandler), c.Token, c.TokenHeader))
+	layerHandler := rpcLayer.NewLayerServer(NewLayerServer(fsCache), nil)
+	mux.Handle(rpcLayer.LayerPathPrefix, withToken(withWaitGroup(layerHandler), c.Token, c.TokenHeader))
 
 	log.Logger.Infof("Listening %s...", addr)
 
@@ -71,7 +78,7 @@ func ListenAndServe(addr string, c config.Config) error {
 func withToken(base http.Handler, token, tokenHeader string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token != "" && token != r.Header.Get(tokenHeader) {
-			rpc.WriteError(w, twirp.NewError(twirp.Unauthenticated, "invalid token"))
+			detector.WriteError(w, twirp.NewError(twirp.Unauthenticated, "invalid token"))
 			return
 		}
 		base.ServeHTTP(w, r)
@@ -134,4 +141,58 @@ func (w dbWorker) hotUpdate(ctx context.Context, cacheDir string, dbUpdateWg, re
 	}
 
 	return nil
+}
+
+var ScanSuperSet = wire.NewSet(
+	local.SuperSet,
+	vulnerability.SuperSet,
+	NewScanServer,
+)
+
+type ScanServer struct {
+	localScanner local.Scanner
+	vulnClient   vulnerability.Operation
+}
+
+func NewScanServer(s local.Scanner, vulnClient vulnerability.Operation) *ScanServer {
+	return &ScanServer{localScanner: s, vulnClient: vulnClient}
+}
+
+func (s *ScanServer) Scan(ctx context.Context, in *rpcScanner.ScanRequest) (*rpcScanner.ScanResponse, error) {
+	results, os, eosl, err := s.localScanner.Scan(in.Target, digest.Digest(in.ImageId), in.LayerIds)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range results {
+		s.vulnClient.FillInfo(results[i].Vulnerabilities, false)
+	}
+	return rpc.ConvertToRpcScanResponse(results, os, eosl), nil
+}
+
+type LayerServer struct {
+	cache cache.Cache
+}
+
+func NewLayerServer(c cache.Cache) *LayerServer {
+	return &LayerServer{cache: c}
+}
+
+func (s *LayerServer) Put(ctx context.Context, in *rpcLayer.PutRequest) (*google_protobuf.Empty, error) {
+	layerInfo := rpc.ConvertFromRpcPutRequest(in)
+	if err := s.cache.PutLayer(in.LayerId, layerInfo); err != nil {
+		return nil, err
+	}
+	return &google_protobuf.Empty{}, nil
+}
+
+func (s *LayerServer) MissingLayers(ctx context.Context, in *rpcLayer.Layers) (*rpcLayer.Layers, error) {
+	var layerIDs []string
+	for _, layerID := range in.LayerIds {
+		b := s.cache.GetLayer(layerID)
+		if b == nil {
+			layerIDs = append(layerIDs, layerID)
+		}
+	}
+	return &rpcLayer.Layers{LayerIds: layerIDs}, nil
 }

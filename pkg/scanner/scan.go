@@ -3,143 +3,136 @@ package scanner
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
-	"sort"
 
 	"github.com/google/wire"
+	digest "github.com/opencontainers/go-digest"
 	"golang.org/x/crypto/ssh/terminal"
-	"golang.org/x/xerrors"
 
 	"github.com/aquasecurity/fanal/analyzer"
 	"github.com/aquasecurity/fanal/cache"
 	"github.com/aquasecurity/fanal/extractor"
 	"github.com/aquasecurity/fanal/extractor/docker"
-	libDetector "github.com/aquasecurity/trivy/pkg/detector/library"
-	ospkgDetector "github.com/aquasecurity/trivy/pkg/detector/ospkg"
+	ftypes "github.com/aquasecurity/fanal/types"
+	"github.com/aquasecurity/trivy/pkg/log"
 	"github.com/aquasecurity/trivy/pkg/report"
-	rpcLibDetector "github.com/aquasecurity/trivy/pkg/rpc/client/library"
-	rpcOSDetector "github.com/aquasecurity/trivy/pkg/rpc/client/ospkg"
-	"github.com/aquasecurity/trivy/pkg/scanner/library"
-	libScanner "github.com/aquasecurity/trivy/pkg/scanner/library"
-	"github.com/aquasecurity/trivy/pkg/scanner/ospkg"
-	ospkgScanner "github.com/aquasecurity/trivy/pkg/scanner/ospkg"
+	"github.com/aquasecurity/trivy/pkg/rpc/client"
+	"github.com/aquasecurity/trivy/pkg/scanner/local"
 	"github.com/aquasecurity/trivy/pkg/types"
-	"github.com/aquasecurity/trivy/pkg/utils"
 )
 
 var StandaloneSet = wire.NewSet(
-	ospkgDetector.SuperSet,
-	ospkgScanner.NewScanner,
-	libDetector.SuperSet,
-	libScanner.NewScanner,
+	types.GetDockerOption,
+	docker.NewDockerExtractor,
+	wire.Bind(new(extractor.Extractor), new(docker.Extractor)),
+	analyzer.New,
+	local.SuperSet,
+	wire.Bind(new(Driver), new(local.Scanner)),
 	NewScanner,
 )
 
 var ClientSet = wire.NewSet(
-	rpcOSDetector.SuperSet,
-	ospkgScanner.NewScanner,
-	rpcLibDetector.SuperSet,
-	libScanner.NewScanner,
+	types.GetDockerOption,
+	docker.NewDockerExtractor,
+	wire.Bind(new(extractor.Extractor), new(docker.Extractor)),
+	analyzer.New,
+	client.SuperSet,
+	wire.Bind(new(Driver), new(client.Scanner)),
 	NewScanner,
 )
 
 type Scanner struct {
-	cacheClient  cache.Cache
-	ospkgScanner ospkg.Scanner
-	libScanner   library.Scanner
+	cacheClient cache.LayerCache
+	driver      Driver
+	analyzer    analyzer.Config
 }
 
-func NewScanner(cacheClient cache.Cache, ospkgScanner ospkg.Scanner, libScanner library.Scanner) Scanner {
-	return Scanner{cacheClient: cacheClient, ospkgScanner: ospkgScanner, libScanner: libScanner}
+type Driver interface {
+	Scan(target string, imageID digest.Digest, layerIDs []string) (report.Results, *ftypes.OS, bool, error)
 }
 
-func (s Scanner) ScanImage(imageName, filePath string, scanOptions types.ScanOptions) (report.Results, error) {
-	results := report.Results{}
+func NewScanner(driver Driver, ac analyzer.Config, cacheClient cache.LayerCache) Scanner {
+	return Scanner{driver: driver, analyzer: ac, cacheClient: cacheClient}
+}
+
+func (s Scanner) ScanImage() (report.Results, error) {
 	ctx := context.Background()
 
-	var target string
-	var files extractor.FileMap
-	var ac analyzer.Config
-	dockerOption, err := types.GetDockerOption()
-	if err != nil {
-		return nil, xerrors.Errorf("failed to get docker option: %w", err)
-	}
-
-	if imageName != "" {
-		dockerOption.Timeout = scanOptions.Timeout
-	}
-	ext, err := docker.NewDockerExtractor(dockerOption, s.cacheClient)
+	//dockerOption, err := types.GetDockerOption()
+	//if err != nil {
+	//	return nil, xerrors.Errorf("failed to get docker option: %w", err)
+	//}
+	//
+	//if imageName != "" {
+	//	dockerOption.Timeout = scanOptions.Timeout
+	//}
+	//
+	//var ext extractor.Extractor
+	//var target string
+	//if imageName != "" {
+	//	target = imageName
+	//	ext, err = docker.NewDockerExtractor(ctx, imageName, dockerOption)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//} else if filePath != "" {
+	//	target = filePath
+	//	ext, err = docker.NewDockerTarExtractor(ctx, imageName, dockerOption)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//} else {
+	//	return nil, xerrors.New("image name or image file must be specified")
+	//}
+	//
+	//ac := analyzer.New(ext, s.cacheClient)
+	imageInfo, err := s.analyzer.Analyze(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ac = analyzer.Config{Extractor: ext}
 
-	if imageName != "" {
-		target = imageName
-		files, err = ac.Analyze(ctx, imageName, dockerOption)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to analyze image: %w", err)
-		}
-	} else if filePath != "" {
-		target = filePath
-		rc, err := openStream(filePath)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to open stream: %w", err)
-		}
-
-		files, err = ac.AnalyzeFile(ctx, rc)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		return nil, xerrors.New("image name or image file must be specified")
-	}
-
-	if utils.StringInSlice("os", scanOptions.VulnType) {
-		osFamily, osVersion, osVulns, err := s.ospkgScanner.Scan(files)
-		if err != nil && err != ospkgDetector.ErrUnsupportedOS {
-			return nil, xerrors.Errorf("failed to scan the image: %w", err)
-		}
-		if osFamily != "" {
-			imageDetail := fmt.Sprintf("%s (%s %s)", target, osFamily, osVersion)
-			results = append(results, report.Result{
-				Target:          imageDetail,
-				Vulnerabilities: osVulns,
-			})
-		}
-	}
-
-	if utils.StringInSlice("library", scanOptions.VulnType) {
-		libVulns, err := s.libScanner.Scan(files)
-		if err != nil {
-			return nil, xerrors.Errorf("failed to scan libraries: %w", err)
-		}
-
-		var libResults report.Results
-		for path, vulns := range libVulns {
-			libResults = append(libResults, report.Result{
-				Target:          path,
-				Vulnerabilities: vulns,
-			})
-		}
-		sort.Slice(libResults, func(i, j int) bool {
-			return libResults[i].Target < libResults[j].Target
-		})
-		results = append(results, libResults...)
-	}
-
-	return results, nil
-}
-
-func (s Scanner) ScanFile(f *os.File) (report.Results, error) {
-	vulns, err := s.libScanner.ScanFile(f)
+	results, osFound, eosl, err := s.driver.Scan(imageInfo.Name, imageInfo.ID, imageInfo.LayerIDs)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to scan libraries in file: %w", err)
+		return nil, err
 	}
-	results := report.Results{
-		{Target: f.Name(), Vulnerabilities: vulns},
+	if eosl {
+		log.Logger.Warnf("This OS version is no longer supported by the distribution: %s %s", osFound.Family, osFound.Name)
+		log.Logger.Warnf("The vulnerability detection may be insufficient because security updates are not provided")
 	}
+
+	//if utils.StringInSlice("os", scanOptions.VulnType) {
+	//	osFamily, osVersion, osVulns, err := s.ospkgScanner.Scan(files)
+	//	if err != nil && err != ospkgDetector.ErrUnsupportedOS {
+	//		return nil, xerrors.Errorf("failed to scan the image: %w", err)
+	//	}
+	//	if osFamily != "" {
+	//		imageDetail := fmt.Sprintf("%s (%s %s)", target, osFamily, osVersion)
+	//		results = append(results, report.Result{
+	//			Target:          imageDetail,
+	//			Vulnerabilities: osVulns,
+	//		})
+	//	}
+	//}
+	//
+	//if utils.StringInSlice("library", scanOptions.VulnType) {
+	//	libVulns, err := s.libScanner.Scan(files)
+	//	if err != nil {
+	//		return nil, xerrors.Errorf("failed to scan libraries: %w", err)
+	//	}
+	//
+	//	var libResults report.Results
+	//	for path, vulns := range libVulns {
+	//		libResults = append(libResults, report.Result{
+	//			Target:          path,
+	//			Vulnerabilities: vulns,
+	//		})
+	//	}
+	//	sort.Slice(libResults, func(i, j int) bool {
+	//		return libResults[i].Target < libResults[j].Target
+	//	})
+	//	results = append(results, libResults...)
+	//}
+
 	return results, nil
 }
 

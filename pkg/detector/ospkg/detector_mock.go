@@ -1,7 +1,7 @@
 package ospkg
 
 import (
-	"github.com/aquasecurity/fanal/analyzer"
+	ftypes "github.com/aquasecurity/fanal/types"
 	"github.com/aquasecurity/trivy/pkg/types"
 	"github.com/stretchr/testify/mock"
 )
@@ -13,7 +13,7 @@ type MockDetector struct {
 type DetectInput struct {
 	OSFamily string
 	OSName   string
-	Pkgs     []analyzer.Package
+	Pkgs     []ftypes.Package
 }
 type DetectOutput struct {
 	Vulns []types.DetectedVulnerability
@@ -34,7 +34,7 @@ func NewMockDetector(detectExpectations []DetectExpectation) *MockDetector {
 	return mockDetector
 }
 
-func (_m *MockDetector) Detect(a, b string, c []analyzer.Package) ([]types.DetectedVulnerability, bool, error) {
+func (_m *MockDetector) Detect(a, b string, c []ftypes.Package) ([]types.DetectedVulnerability, bool, error) {
 	ret := _m.Called(a, b, c)
 	ret0 := ret.Get(0)
 	if ret0 == nil {

@@ -3,6 +3,8 @@
 package standalone
 
 import (
+	"context"
+
 	"github.com/aquasecurity/fanal/cache"
 	"github.com/aquasecurity/trivy/internal/operation"
 	"github.com/aquasecurity/trivy/pkg/scanner"
@@ -15,9 +17,9 @@ func initializeCacheClient(cacheDir string) (operation.Cache, error) {
 	return operation.Cache{}, nil
 }
 
-func initializeScanner(c cache.Cache) scanner.Scanner {
+func initializeScanner(ctx context.Context, imageName string, layerCache cache.LayerCache, localLayerCache cache.LocalLayerCache) (scanner.Scanner, error) {
 	wire.Build(scanner.StandaloneSet)
-	return scanner.Scanner{}
+	return scanner.Scanner{}, nil
 }
 
 func initializeVulnerabilityClient() vulnerability.Client {
