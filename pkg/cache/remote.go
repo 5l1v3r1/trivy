@@ -22,8 +22,8 @@ func NewRemoteCache(url RemoteURL) cache.LayerCache {
 	return &RemoteCache{client: client}
 }
 
-func (c RemoteCache) PutLayer(layerID string, layerInfo types.LayerInfo) error {
-	_, err := c.client.Put(context.Background(), rpc.ConvertToRpcLayerInfo(layerID, layerInfo))
+func (c RemoteCache) PutLayer(layerID, decompressedLayerID string, layerInfo types.LayerInfo) error {
+	_, err := c.client.Put(context.Background(), rpc.ConvertToRpcLayerInfo(layerID, decompressedLayerID, layerInfo))
 	if err != nil {
 		return err
 	}

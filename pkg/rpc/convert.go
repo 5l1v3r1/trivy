@@ -194,7 +194,7 @@ func ConvertToRpcOS(fos *ftypes.OS) *common.OS {
 	}
 }
 
-func ConvertToRpcLayerInfo(layerID string, layerInfo ftypes.LayerInfo) *layer.PutRequest {
+func ConvertToRpcLayerInfo(layerID, decompressedLayerID string, layerInfo ftypes.LayerInfo) *layer.PutRequest {
 	var packageInfos []*common.PackageInfo
 	for _, pkgInfo := range layerInfo.PackageInfos {
 		var pkgs []*common.Package
@@ -235,13 +235,14 @@ func ConvertToRpcLayerInfo(layerID string, layerInfo ftypes.LayerInfo) *layer.Pu
 	}
 
 	return &layer.PutRequest{
-		LayerId:       layerID,
-		SchemaVersion: analyzer.SchemaVersion,
-		Os:            ConvertToRpcOS(layerInfo.OS),
-		PackageInfos:  packageInfos,
-		Applications:  applications,
-		OpaqueDirs:    layerInfo.OpaqueDirs,
-		WhiteoutFiles: layerInfo.WhiteoutFiles,
+		LayerId:             layerID,
+		DecompressedLayerId: decompressedLayerID,
+		SchemaVersion:       analyzer.SchemaVersion,
+		Os:                  ConvertToRpcOS(layerInfo.OS),
+		PackageInfos:        packageInfos,
+		Applications:        applications,
+		OpaqueDirs:          layerInfo.OpaqueDirs,
+		WhiteoutFiles:       layerInfo.WhiteoutFiles,
 	}
 }
 

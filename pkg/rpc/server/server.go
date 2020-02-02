@@ -180,7 +180,7 @@ func NewLayerServer(c cache.Cache) *LayerServer {
 
 func (s *LayerServer) Put(ctx context.Context, in *rpcLayer.PutRequest) (*google_protobuf.Empty, error) {
 	layerInfo := rpc.ConvertFromRpcPutRequest(in)
-	if err := s.cache.PutLayer(in.LayerId, layerInfo); err != nil {
+	if err := s.cache.PutLayer(in.LayerId, in.DecompressedLayerId, layerInfo); err != nil {
 		return nil, err
 	}
 	return &google_protobuf.Empty{}, nil

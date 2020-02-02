@@ -13,12 +13,13 @@ service Layer {
 
 message PutRequest {
   string    layer_id                         = 1;
-  int32     schema_version                   = 2;
-  common.OS os                               = 3;
-  repeated common.PackageInfo package_infos  = 4;
-  repeated common.Application applications   = 5;
-  repeated string             opaque_dirs    = 6;
-  repeated string             whiteout_files = 7;
+  string    decompressed_layer_id            = 2;
+  int32     schema_version                   = 3;
+  common.OS os                               = 4;
+  repeated common.PackageInfo package_infos  = 5;
+  repeated common.Application applications   = 6;
+  repeated string             opaque_dirs    = 7;
+  repeated string             whiteout_files = 8;
 }
 
 message PutResponse {
